@@ -1,0 +1,212 @@
+#Standard libs
+import numpy as np 
+import pandas as pd 
+
+
+#Data Visualisation libs
+import matplotlib.pyplot as plt
+import seaborn as sns
+import scipy.stats as st
+
+#Feature engineering, metrics and modeling libs
+from sklearn.tree import DecisionTreeRegressor
+from sklearn.metrics import mean_absolute_error
+from sklearn.model_selection import train_test_split
+from sklearn.model_selection import cross_val_score
+from sklearn.ensemble import RandomForestRegressor
+from xgboost import XGBRegressor
+from sklearn.pipeline import make_pipeline
+
+
+
+
+
+df = pd.read_csv(r'https://raw.githubusercontent.com/dsrscientist/dataset1/master/abalone.csv')
+
+df.info()
+
+
+df.describe()
+
+df.shape
+
+len(df.isnull())
+
+#Data Analysis-skewness of the target variable [Rings]
+rings = df['Rings']
+plt.figure(1);plt.title('Normal')
+sns.distplot(rings,kde=False,fit=st.norm)
+plt.figure(2);plt.title('Johnson SU')
+sns.distplot(rings,kde=False,fit=st.johnsonsu)
+plt.figure(3);plt.title('Log Normal')
+sns.distplot(rings,kde=False,fit=st.lognorm)
+
+
+#None of theses distributions fit our data perfectly. So we need to find another one to match our data
+plt.hist(rings,color='green')
+plt.title('Histogram of rings')
+plt.xlabel('Number of Rings')
+plt.ylabel('count')
+
+# To find strongly correlated variables
+numeric_features = df.select_dtypes(include=[np.number])
+correlation = numeric_features.corr()
+
+
+print(correlation['Rings']sort_values(ascending=False))
+
+plt.title('Correlation of numeric features', y=1,size=16)
+sns.heatmap(correlation,square=True,vmax=0.8)
+
+cols = ['Rings','Shell weight','Diameter','Height','Length']
+sns.pairplot(df[cols],size=2,kind='scatter')
+plt.show()
+
+#most frequent Sex in the dataset,
+sns.countplot(df['Sex'], palette="Set3")
+plt.title('Count of the Gender of Abalone')
+
+#Distribution of Rings
+sns.countplot(df['Rings'])
+plt.title('Distribution of Rings')
+
+# To check highest correlation with Rings and comparison with different sexes.
+p = sns.FacetGrid(df, col="Sex", hue="Sex")
+p=p.map(plt.scatter,"Rings", "Shell weight")
+
+f = (df.loc[df['Sex'].isin(['M','F'])]
+      .loc[:,['Shell weight','Rings','Sex']])
+
+f = f[f["Rings"] >= 8]
+f = f[f["Rings"] < 23]
+sns.boxplot(x="Rings",y="Shell weight", hue='Sex',data=f)
+
+# Clear visualization of outliers
+w = (df.loc[df['Sex'].isin(['I'])]
+    .loc[:,['Shell weight','Rings','Sex']])
+w = w[w["Rings"] >= 8]
+w = w[w["Rings"] < 23]
+sns.boxplot(x="Rings",y="Shell weight", hue='Sex',data=w)
+
+#remove outliers and converting the observations into Zscores
+from scipy import stats
+z= np.abs(stats.zscore(df.select_dtypes(include=[np.number])))
+print(z)
+
+
+
+# Removing all the data points that are below three standard deviations away from the mean.
+df_o = df[(z < 3).all(axis=1)]
+
+
+print("Shape of dataframe with outliers: "+ str(df.shape) , 
+      "Shape of dataframe without outliers: " + str(df_o.shape))
+
+low_cardinality_cols = [cname for cname in df_o.columns if
+                        df_o[cname].nunique() < 10 and 
+                        df_o[cname].dtype == "object"]
+numeric_cols = [cname for cname in df_o.columns if
+                                 df_o[cname].dtype in ['int64','float64']]
+
+my_cols = low_cardinality_cols + numeric_cols
+df_predictors = df_o[my_cols]
+
+df_predictors.dtypes.sample(7)
+
+df_encoded_predictors = pd.get_dummies(df_predictors)
+
+df_encoded_predictors.head(5)
+
+df_encoded_predictors.shape
+
+# Now dataframe now has three new columns Sex_F, Sex_I and Sex_M.
+
+#Decision Trees-Cross Validation
+Decision Trees al
+cross_cols = ['Length','Diameter','Height','Whole weight','Shucked weight','Viscera weight','Shell weight','Sex_F','Sex_I','Sex_M']
+X = df_encoded_predictors[cross_cols]
+y = df_encoded_predictors.Rings
+
+decision_pipeline = make_pipeline(DecisionTreeRegressor())
+decision_scores = cross_val_score(decision_pipeline, X,y,scoring='neg_mean_absolute_error')
+
+print('MAE %2f' %(-1 * decision_scores.mean()))
+
+#Train Test Split
+dt_train_X,dt_test_X,dt_train_y,dt_test_y = train_test_split(X,y)
+
+def get_mae(max_leaf_nodes,dt_train_X,dt_test_X,dt_train_y,dt_test_y ):
+    model_pipeline = make_pipeline(DecisionTreeRegressor(max_leaf_nodes=max_leaf_nodes,random_state=0))
+    model_pipeline.fit(dt_train_X,dt_train_y)
+    preds_val = model_pipeline.predict(dt_test_X)
+    mae = mean_absolute_error(dt_test_y,preds_val)
+    return(mae)
+
+for max_leaf_nodes in [5,50,500,5000]:
+    my_mae = get_mae(max_leaf_nodes,dt_train_X,dt_test_X,dt_train_y,dt_test_y)
+    print("Max leaf nodes: %d \t\t MAE: %d" %(max_leaf_nodes,my_mae))
+
+decision_split_pipeline = make_pipeline(DecisionTreeRegressor(max_leaf_nodes=5))
+decision_split_pipeline.fit(dt_train_X,dt_train_y)
+decision_tree_prediction = decision_split_pipeline.predict(dt_test_X)
+print("MAE: " + str(mean_absolute_error(decision_tree_prediction,dt_test_y)))
+
+acc_decision = decision_split_pipeline.score(dt_test_X,dt_test_y)
+print("Acc:", acc_decision )
+
+
+#train-test split for the Decision Tree is best.
+
+plt.scatter(dt_test_y,decision_tree_prediction,color='green')
+plt.xlabel('Actuals')
+plt.ylabel('Predictions')
+plt.title('Decision Tree: Actuals vs Predictions')
+plt.show()
+
+#Random Forests-Cross Validation
+forest_pipeline = make_pipeline(RandomForestRegressor(random_state=1))
+forest_scores = cross_val_score(forest_pipeline, X,y,scoring="neg_mean_absolute_error")
+print('MAE %2f' %(-1 * forest_scores.mean()))
+
+#Train Test Split
+f_train_X,f_test_X,f_train_y,f_test_y = train_test_split(X,y)
+forest_split_pipeline = make_pipeline(RandomForestRegressor(random_state=1))
+forest_split_pipeline.fit(f_train_X,f_train_y)
+forest_predictions = forest_split_pipeline.predict(f_test_X)
+print("Accuracy:",forest_split_pipeline.score(f_test_X,f_test_y))
+print("MAE:",str(mean_absolute_error(forest_predictions,f_test_y)))
+
+plt.scatter(f_test_y,forest_predictions,color='red')
+plt.xlabel('Actuals')
+plt.ylabel('Predictions')
+plt.title('Actuals vs Predictions')
+plt.show()
+
+#XGBoost
+xgb_pipeline = make_pipeline(XGBRegressor())
+xgb_scores = cross_val_score(xgb_pipeline,X.values,y.values,scoring="neg_mean_absolute_error")
+print("MAE %2f" %(-1 * xgb_scores.mean()) )
+
+#Train Test Split
+train_X,test_X,train_y,test_y = train_test_split(X.values,y.values,test_size=0.25)
+
+xgb_model = XGBRegressor()
+xgb_model.fit(train_X,train_y,verbose=False)
+xgb_preds = xgb_model.predict(test_X)
+print("MAE: " + str(mean_absolute_error(xgb_preds,test_y)))
+print("Accuracy:",xgb_model.score(test_X,test_y))
+
+xgb_model_II = XGBRegressor(n_estimators=1000,learning_rat=0.05)
+xgb_model_II.fit(train_X,train_y,early_stopping_rounds=5,
+             eval_set=[(test_X,test_y)],verbose=False)
+xgb_preds = xgb_model_II.predict(test_X)
+print("MAE: " + str(mean_absolute_error(xgb_preds,test_y)))
+print("Accuracy:",xgb_model_II.score(test_X,test_y))
+
+
+plt.scatter(test_y,xgb_preds,color='blue')
+plt.xlabel('Actuals')
+plt.ylabel('Predictions')
+plt.title('Actuals vs Predictions')
+plt.show()
+
